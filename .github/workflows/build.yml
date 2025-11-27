@@ -228,20 +228,30 @@ jobs:
             make dlls/win32u/win32u.so || echo "Could not build win32u.so"
           fi
           
-          # Use make install (like build-wine.sh does) - this installs everything
-          echo "Installing Wine (using ${{ env.BUILD_THREADS }} threads)..."
-          make install -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
-            echo "❌ ERROR: Failed to install Wine"
+          # For 64-bit only builds, we need to install components separately
+          # to ensure everything is installed (libs, programs, headers)
+          echo "Installing Wine libraries..."
+          make install-lib -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
+            echo "❌ ERROR: Failed to install Wine libraries"
             echo "Last 50 lines of install log:"
             tail -50 wine-install.log
             exit 1
           }
           
-          # For 64-bit only builds, make install might not install headers
-          # Explicitly install development files to ensure include/ is present
+          echo ""
+          echo "Installing Wine programs and binaries..."
+          make install-programs -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
+            echo "⚠ WARNING: make install-programs failed, trying make install..."
+            make install -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
+              echo "❌ ERROR: Failed to install Wine programs"
+              tail -50 wine-install.log
+              exit 1
+            }
+          }
+          
           echo ""
           echo "Installing Wine development files (headers)..."
-          make install-dev 2>&1 | tee -a wine-install.log || {
+          make install-dev -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
             echo "⚠ WARNING: make install-dev failed, but continuing..."
           }
           
