@@ -168,6 +168,13 @@ jobs:
           # Filter out parser/sql warnings from output
           grep -Ev "(parser|sql)\.y: (warning|note):" wine-build.log || true
           echo "✓ Wine build completed successfully"
+          
+          # Verify critical build artifacts exist
+          if [ ! -f "programs/wine/wine" ] && [ ! -f "programs/wine64/wine64" ]; then
+            echo "❌ ERROR: Wine executables not found after build!"
+            exit 1
+          fi
+          echo "✓ Wine executables verified"
 
       - name: Install Wine
         working-directory: wine64-build
@@ -178,8 +185,24 @@ jobs:
           CROSSLDFLAGS: ${{ env.CROSSLDFLAGS }}
         run: |
           echo "Installing Wine..."
-          make install -j${{ env.BUILD_THREADS }} || {
+          # Verify win32u.so was built before attempting install
+          if [ ! -f "dlls/win32u/win32u.so" ]; then
+            echo "⚠ WARNING: win32u.so not found, checking if it needs to be built..."
+            # Try to build just win32u if it's missing
+            make dlls/win32u/win32u.so || echo "Could not build win32u.so"
+          fi
+          
+          # Use single-threaded install to avoid race conditions
+          make install 2>&1 | tee wine-install.log || {
             echo "❌ ERROR: Failed to install Wine"
+            echo "Checking for win32u.so:"
+            ls -la dlls/win32u/win32u.so 2>&1 || echo "win32u.so not found"
+            echo ""
+            echo "Last 100 lines of install log:"
+            tail -100 wine-install.log
+            echo ""
+            echo "Searching for win32u errors in install log:"
+            grep -i "win32u" wine-install.log | tail -20 || true
             exit 1
           }
           echo "✓ Wine installed successfully"
