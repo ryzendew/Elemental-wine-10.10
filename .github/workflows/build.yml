@@ -223,29 +223,49 @@ jobs:
             exit 1
           }
           
-          # Check what was actually installed
+          # Check what was actually installed and fail if required directories are missing
           echo ""
           echo "Checking installed directories:"
-          if [ -d "${{ env.INSTALL_PREFIX }}" ]; then
-            echo "Install prefix: ${{ env.INSTALL_PREFIX }}"
-            ls -la "${{ env.INSTALL_PREFIX }}" || true
-            echo ""
-            echo "Checking for required directories:"
-            for dir in bin include lib share; do
-              if [ -d "${{ env.INSTALL_PREFIX }}/$dir" ]; then
-                echo "  ✓ $dir/ exists ($(find "${{ env.INSTALL_PREFIX }}/$dir" -type f 2>/dev/null | wc -l) files)"
-              else
-                echo "  ✗ $dir/ MISSING"
-              fi
-            done
-          else
+          if [ ! -d "${{ env.INSTALL_PREFIX }}" ]; then
             echo "❌ ERROR: Install prefix directory not found at ${{ env.INSTALL_PREFIX }}"
             echo "Checking what was created:"
             ls -la .. | grep -E "(wine|install)" || true
             exit 1
           fi
           
-          echo "✓ Wine installed successfully"
+          echo "Install prefix: ${{ env.INSTALL_PREFIX }}"
+          ls -la "${{ env.INSTALL_PREFIX }}" || true
+          echo ""
+          
+          # Verify all required directories exist, fail if any are missing
+          MISSING_DIRS=()
+          echo "Checking for required directories:"
+          for dir in bin include lib share; do
+            if [ -d "${{ env.INSTALL_PREFIX }}/$dir" ]; then
+              file_count=$(find "${{ env.INSTALL_PREFIX }}/$dir" -type f 2>/dev/null | wc -l)
+              echo "  ✓ $dir/ exists ($file_count files)"
+              if [ "$file_count" -eq 0 ]; then
+                echo "  ⚠ WARNING: $dir/ is empty!"
+              fi
+            else
+              echo "  ❌ $dir/ MISSING!"
+              MISSING_DIRS+=("$dir")
+            fi
+          done
+          
+          if [ ${#MISSING_DIRS[@]} -gt 0 ]; then
+            echo ""
+            echo "❌ ERROR: Missing required directories: ${MISSING_DIRS[*]}"
+            echo "Install log summary:"
+            grep -i "error\|fail\|missing" wine-install.log | tail -20 || true
+            echo ""
+            echo "Full directory structure:"
+            find "${{ env.INSTALL_PREFIX }}" -maxdepth 2 -type d 2>/dev/null | sort
+            exit 1
+          fi
+          
+          echo ""
+          echo "✓ Wine installed successfully - all required directories present"
 
       - name: Verify installation
         run: |
@@ -311,11 +331,35 @@ jobs:
           done
           
           echo ""
+          echo "Checking wine-install directory contents:"
+          ls -la wine-install/ || { echo "❌ ERROR: wine-install directory not found!"; exit 1; }
+          echo ""
+          echo "Checking if directories have content:"
+          for dir in bin include lib share; do
+            if [ -d "wine-install/$dir" ]; then
+              file_count=$(find "wine-install/$dir" -type f 2>/dev/null | wc -l)
+              echo "  $dir/: $file_count files"
+              if [ "$file_count" -eq 0 ]; then
+                echo "  ⚠ WARNING: $dir/ is empty!"
+              fi
+            fi
+          done
+          echo ""
+          
           echo "Creating tarball with all contents (bin, include, lib, share)..."
-          tar -cJf ElementalWarrior-wine-10.10.tar.xz -C wine-install .
+          # Use verbose mode to see what's being added, and handle errors properly
+          if ! tar -cJf ElementalWarrior-wine-10.10.tar.xz -C wine-install . 2>&1; then
+            echo "❌ ERROR: tar command failed!"
+            echo "Checking wine-install directory:"
+            ls -la wine-install/ || true
+            echo ""
+            echo "Checking if wine-install is empty:"
+            find wine-install -maxdepth 1 -type f 2>/dev/null | head -10 || echo "No files found"
+            exit 1
+          fi
           
           if [ ! -f "ElementalWarrior-wine-10.10.tar.xz" ]; then
-            echo "❌ ERROR: Failed to create tarball!"
+            echo "❌ ERROR: Tarball file was not created!"
             exit 1
           fi
           
@@ -326,16 +370,30 @@ jobs:
           echo "Tarball location: ${{ github.workspace }}/ElementalWarrior-wine-10.10.tar.xz"
           echo ""
           echo "Verifying tarball contents:"
+          if ! tar -tzf ElementalWarrior-wine-10.10.tar.xz > /dev/null 2>&1; then
+            echo "❌ ERROR: Tarball is corrupted or empty!"
+            exit 1
+          fi
+          
           tar -tzf ElementalWarrior-wine-10.10.tar.xz | head -20
           echo "..."
-          echo "Total files in tarball: $(tar -tzf ElementalWarrior-wine-10.10.tar.xz | wc -l)"
+          total_files=$(tar -tzf ElementalWarrior-wine-10.10.tar.xz | wc -l)
+          echo "Total files in tarball: $total_files"
+          
+          if [ "$total_files" -eq 0 ]; then
+            echo "❌ ERROR: Tarball is empty!"
+            exit 1
+          fi
+          
           echo ""
           echo "Checking for required directories in tarball:"
           for dir in bin include lib share; do
-            if tar -tzf ElementalWarrior-wine-10.10.tar.xz | grep -q "^$dir/"; then
+            if tar -tzf ElementalWarrior-wine-10.10.tar.xz 2>/dev/null | grep -q "^$dir/"; then
               echo "✓ $dir/ found in tarball"
             else
               echo "❌ $dir/ NOT found in tarball!"
+              echo "Available directories in tarball:"
+              tar -tzf ElementalWarrior-wine-10.10.tar.xz 2>/dev/null | cut -d'/' -f1 | sort -u | head -10
               exit 1
             fi
           done
