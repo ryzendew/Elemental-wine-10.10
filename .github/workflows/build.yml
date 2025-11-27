@@ -374,11 +374,6 @@ jobs:
             exit 1
           fi
           
-          if [ ! -f "ElementalWarrior-wine-10.10.tar.xz" ]; then
-            echo "❌ ERROR: Tarball file was not created!"
-            exit 1
-          fi
-          
           # Check tarball was created and has content
           if [ ! -f "ElementalWarrior-wine-10.10.tar.xz" ]; then
             echo "❌ ERROR: Tarball file was not created!"
@@ -403,24 +398,19 @@ jobs:
           echo "Tarball location: ${{ github.workspace }}/ElementalWarrior-wine-10.10.tar.xz"
           echo ""
           echo "Verifying tarball contents:"
-          # Test if tarball can be read
-          tar_output=$(tar -tzf ElementalWarrior-wine-10.10.tar.xz 2>&1)
-          tar_exit=$?
           
-          if [ $tar_exit -ne 0 ]; then
-            echo "❌ ERROR: Cannot read tarball (exit code: $tar_exit)!"
+          # Test if tarball can be read - use a temp file to avoid issues with command substitution
+          if ! tar -tzf ElementalWarrior-wine-10.10.tar.xz > /tmp/tarball-contents.txt 2>/tmp/tar-errors.txt; then
+            echo "❌ ERROR: Cannot read tarball!"
             echo "Tar error output:"
-            echo "$tar_output"
+            cat /tmp/tar-errors.txt || true
             echo ""
             echo "Checking tarball file type:"
             file ElementalWarrior-wine-10.10.tar.xz || true
-            echo ""
-            echo "Checking wine-install before tarball creation:"
-            ls -la wine-install/ || true
             exit 1
           fi
           
-          total_files=$(echo "$tar_output" | wc -l)
+          total_files=$(wc -l < /tmp/tarball-contents.txt)
           echo "Total files in tarball: $total_files"
           
           if [ "$total_files" -eq 0 ]; then
@@ -431,18 +421,18 @@ jobs:
           fi
           
           echo "Sample of tarball contents:"
-          echo "$tar_output" | head -20
+          head -20 /tmp/tarball-contents.txt
           echo "..."
           
           echo ""
           echo "Checking for required directories in tarball:"
           for dir in bin include lib share; do
-            if tar -tzf ElementalWarrior-wine-10.10.tar.xz 2>/dev/null | grep -q "^$dir/"; then
+            if grep -q "^$dir/" /tmp/tarball-contents.txt; then
               echo "✓ $dir/ found in tarball"
             else
               echo "❌ $dir/ NOT found in tarball!"
               echo "Available directories in tarball:"
-              tar -tzf ElementalWarrior-wine-10.10.tar.xz 2>/dev/null | cut -d'/' -f1 | sort -u | head -10
+              cut -d'/' -f1 /tmp/tarball-contents.txt | sort -u | head -10
               exit 1
             fi
           done
