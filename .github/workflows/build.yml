@@ -198,6 +198,13 @@ jobs:
             echo "⚠ WARNING: Some programs may not have been built"
           }
           
+          # Ensure all DLLs are built (some might not be built by default)
+          echo ""
+          echo "Building all Wine DLLs..."
+          make dlls -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-build.log || {
+            echo "⚠ WARNING: Some DLLs may not have been built"
+          }
+          
           # Verify critical build artifacts exist (check multiple possible locations)
           echo "Checking for Wine executables..."
           if [ -f "programs/wine/wine" ]; then
@@ -213,6 +220,17 @@ jobs:
             ls -la programs/*/ 2>/dev/null | head -20 || true
             echo "Build completed successfully, continuing with install..."
           fi
+          
+          # Verify some critical DLLs were built
+          echo ""
+          echo "Checking for critical DLLs..."
+          for dll in dlls/win32u/win32u.so dlls/opengl32/opengl32.so dlls/winex11.drv/winex11.so dlls/winepulse.drv/winepulse.so; do
+            if [ -f "$dll" ]; then
+              echo "✓ Found: $dll"
+            else
+              echo "⚠ WARNING: $dll not found"
+            fi
+          done
 
       - name: Install Wine
         working-directory: wine64-build
@@ -228,12 +246,24 @@ jobs:
           # Initialize install log
           echo "=== Wine Installation Log ===" > wine-install.log
           
-          # Verify win32u.so was built before attempting install
-          if [ ! -f "dlls/win32u/win32u.so" ]; then
-            echo "⚠ WARNING: win32u.so not found, checking if it needs to be built..."
-            # Try to build just win32u if it's missing
-            make dlls/win32u/win32u.so || echo "Could not build win32u.so"
-          fi
+          # Ensure all DLLs are built before installation
+          echo "Building any missing DLLs before installation..."
+          # Build critical DLLs that might be missing
+          for dll in dlls/win32u/win32u.so dlls/opengl32/opengl32.so dlls/winex11.drv/winex11.so \
+                     dlls/winepulse.drv/winepulse.so dlls/winealsa.drv/winealsa.so \
+                     dlls/winewayland.drv/winewayland.so dlls/winevulkan.drv/winevulkan.so \
+                     dlls/secur32/secur32.so dlls/ws2_32/ws2_32.so dlls/winspool.drv/winspool.so \
+                     dlls/winscard/winscard.so dlls/qcap/qcap.so dlls/avicap32/avicap32.so \
+                     dlls/sane.ds/sane.so dlls/winebus.sys/winebus.so dlls/wineusb.sys/wineusb.so \
+                     dlls/winebth.sys/winebth.so dlls/wineps.drv/wineps.so dlls/winedmo/winedmo.so \
+                     dlls/winegstreamer/winegstreamer.so dlls/wpcap/wpcap.so; do
+            if [ ! -f "$dll" ]; then
+              echo "Building missing DLL: $dll"
+              make "$dll" -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
+                echo "⚠ WARNING: Failed to build $dll"
+              }
+            fi
+          done
           
           # For 64-bit only builds (--enable-win64), programs are NOT included in TOP_INSTALL_LIB
           # We need to install libs, dev files, and then explicitly install programs
