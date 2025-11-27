@@ -244,24 +244,51 @@ jobs:
           ls -la "${{ env.INSTALL_PREFIX }}" || true
           echo ""
           
-          # Check for bin directory (might be in different location)
-          if [ -d "${{ env.INSTALL_PREFIX }}/bin" ]; then
-            echo "✓ Bin directory found"
-            echo "Bin directory contents:"
-            ls -la "${{ env.INSTALL_PREFIX }}/bin" || true
-          else
-            echo "⚠ WARNING: bin directory not found at expected location"
-            echo "Searching for bin directories:"
-            find "${{ env.INSTALL_PREFIX }}" -type d -name "bin" 2>/dev/null | head -5 || echo "No bin directories found"
+          # Verify all required directories exist (bin, include, lib, share)
+          REQUIRED_DIRS=("bin" "include" "lib" "share")
+          MISSING_DIRS=()
+          
+          for dir in "${REQUIRED_DIRS[@]}"; do
+            if [ -d "${{ env.INSTALL_PREFIX }}/$dir" ]; then
+              echo "✓ $dir/ directory found"
+              echo "  Contents: $(ls -1 "${{ env.INSTALL_PREFIX }}/$dir" | wc -l) items"
+            else
+              echo "❌ $dir/ directory MISSING!"
+              MISSING_DIRS+=("$dir")
+            fi
+          done
+          
+          if [ ${#MISSING_DIRS[@]} -gt 0 ]; then
             echo ""
+            echo "❌ ERROR: Missing required directories: ${MISSING_DIRS[*]}"
             echo "Full directory structure:"
-            find "${{ env.INSTALL_PREFIX }}" -maxdepth 2 -type d 2>/dev/null | head -20 || true
+            find "${{ env.INSTALL_PREFIX }}" -maxdepth 2 -type d 2>/dev/null | sort
+            exit 1
           fi
+          
+          echo ""
+          echo "✓ All required directories verified (bin, include, lib, share)"
+          echo ""
+          echo "Directory sizes:"
+          du -sh "${{ env.INSTALL_PREFIX }}"/* 2>/dev/null || true
 
       - name: Create tarball
         run: |
           echo "Creating tarball ElementalWarrior-wine-10.10.tar.xz..."
           cd ${{ github.workspace }}
+          
+          # Verify all required directories exist before creating tarball
+          echo "Verifying all required directories are present:"
+          for dir in bin include lib share; do
+            if [ ! -d "wine-install/$dir" ]; then
+              echo "❌ ERROR: Required directory 'wine-install/$dir' is missing!"
+              exit 1
+            fi
+            echo "✓ wine-install/$dir/ exists"
+          done
+          
+          echo ""
+          echo "Creating tarball with all contents (bin, include, lib, share)..."
           tar -cJf ElementalWarrior-wine-10.10.tar.xz -C wine-install .
           
           if [ ! -f "ElementalWarrior-wine-10.10.tar.xz" ]; then
@@ -274,6 +301,22 @@ jobs:
           echo ""
           echo "Tarball size: $(du -h ElementalWarrior-wine-10.10.tar.xz | cut -f1)"
           echo "Tarball location: ${{ github.workspace }}/ElementalWarrior-wine-10.10.tar.xz"
+          echo ""
+          echo "Verifying tarball contents:"
+          tar -tzf ElementalWarrior-wine-10.10.tar.xz | head -20
+          echo "..."
+          echo "Total files in tarball: $(tar -tzf ElementalWarrior-wine-10.10.tar.xz | wc -l)"
+          echo ""
+          echo "Checking for required directories in tarball:"
+          for dir in bin include lib share; do
+            if tar -tzf ElementalWarrior-wine-10.10.tar.xz | grep -q "^$dir/"; then
+              echo "✓ $dir/ found in tarball"
+            else
+              echo "❌ $dir/ NOT found in tarball!"
+              exit 1
+            fi
+          done
+          echo "✓ All required directories (bin, include, lib, share) are in the tarball"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
