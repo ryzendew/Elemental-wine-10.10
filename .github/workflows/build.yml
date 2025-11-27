@@ -96,17 +96,7 @@ jobs:
             libgstreamer-plugins-base1.0-dev \
             samba-dev \
             ocl-icd-opencl-dev \
-            opencl-headers \
-            libvkd3d-dev \
-            libvkd3d-utils-dev \
-            libvkd3d-shader-dev \
-            libfaudio-dev \
-            libmpg123-dev \
-            libfluidsynth-dev \
-            libgsm1-dev \
-            libjpeg-turbo8-dev \
-            libjxr-dev \
-            zlib1g-dev
+            opencl-headers
 
       - name: Verify OpenCL headers
         run: |
