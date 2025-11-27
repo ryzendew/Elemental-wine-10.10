@@ -399,41 +399,45 @@ jobs:
           echo ""
           echo "Verifying tarball contents:"
           
-          # Test if tarball can be read - use a temp file to avoid issues with command substitution
+          # Test if tarball can be read - disable exit on error temporarily
+          set +e
           tar -tzf ElementalWarrior-wine-10.10.tar.xz > /tmp/tarball-contents.txt 2>/tmp/tar-errors.txt
           tar_exit=$?
+          set -e
           
           if [ $tar_exit -ne 0 ]; then
-            echo "❌ ERROR: Cannot read tarball (exit code: $tar_exit)!"
+            echo "⚠ WARNING: tar -tzf failed (exit code: $tar_exit), trying alternative method..."
             echo "Tar error output:"
             cat /tmp/tar-errors.txt 2>/dev/null || echo "(no error output)"
-            echo ""
-            echo "Checking tarball file:"
-            file ElementalWarrior-wine-10.10.tar.xz || true
-            ls -lh ElementalWarrior-wine-10.10.tar.xz || true
-            echo ""
-            echo "Attempting to decompress and check:"
-            xz -t ElementalWarrior-wine-10.10.tar.xz 2>&1 || echo "XZ test failed"
-            echo ""
-            echo "Trying to extract and check:"
-            xz -dc ElementalWarrior-wine-10.10.tar.xz 2>&1 | tar -t 2>&1 | head -10 || echo "Extraction test failed"
-            echo ""
-            echo "Checking wine-install contents that should be in tarball:"
-            find wine-install -type f 2>/dev/null | head -20 || true
-            echo ""
-            echo "Checking wine-install directory structure:"
-            find wine-install -maxdepth 2 -type d 2>/dev/null | sort || true
-            exit 1
+            
+            # Try alternative: decompress first, then list
+            set +e
+            xz -dc ElementalWarrior-wine-10.10.tar.xz 2>/dev/null | tar -t > /tmp/tarball-contents.txt 2>/tmp/tar-errors2.txt
+            alt_exit=$?
+            set -e
+            
+            if [ $alt_exit -ne 0 ]; then
+              echo "❌ ERROR: Both tar methods failed!"
+              echo "Alternative method errors:"
+              cat /tmp/tar-errors2.txt 2>/dev/null || echo "(no errors)"
+              echo ""
+              echo "Checking tarball file:"
+              file ElementalWarrior-wine-10.10.tar.xz || true
+              ls -lh ElementalWarrior-wine-10.10.tar.xz || true
+              echo ""
+              echo "Checking wine-install contents:"
+              find wine-install -type f 2>/dev/null | head -20 || true
+              exit 1
+            else
+              echo "✓ Alternative method succeeded"
+            fi
           fi
           
           # Check if the output file has content
           if [ ! -s /tmp/tarball-contents.txt ]; then
             echo "❌ ERROR: Tarball listing is empty!"
-            echo "Tar errors:"
-            cat /tmp/tar-errors.txt 2>/dev/null || echo "(no errors)"
-            echo ""
-            echo "Trying alternative method to list tarball:"
-            xz -dc ElementalWarrior-wine-10.10.tar.xz 2>&1 | tar -t 2>&1 | head -20 || echo "Alternative method failed"
+            echo "Checking wine-install:"
+            find wine-install -type f 2>/dev/null | head -20 || true
             exit 1
           fi
           
@@ -442,8 +446,6 @@ jobs:
           
           if [ "$total_files" -eq 0 ]; then
             echo "❌ ERROR: Tarball is empty (no files listed)!"
-            echo "Checking what's in wine-install:"
-            find wine-install -type f 2>/dev/null | head -20 || true
             exit 1
           fi
           
@@ -453,16 +455,24 @@ jobs:
           
           echo ""
           echo "Checking for required directories in tarball:"
+          MISSING_IN_TARBALL=()
           for dir in bin include lib share; do
             if grep -q "^$dir/" /tmp/tarball-contents.txt; then
               echo "✓ $dir/ found in tarball"
             else
               echo "❌ $dir/ NOT found in tarball!"
-              echo "Available directories in tarball:"
-              cut -d'/' -f1 /tmp/tarball-contents.txt | sort -u | head -10
-              exit 1
+              MISSING_IN_TARBALL+=("$dir")
             fi
           done
+          
+          if [ ${#MISSING_IN_TARBALL[@]} -gt 0 ]; then
+            echo ""
+            echo "❌ ERROR: Missing directories in tarball: ${MISSING_IN_TARBALL[*]}"
+            echo "Available directories in tarball:"
+            cut -d'/' -f1 /tmp/tarball-contents.txt | sort -u | head -10
+            exit 1
+          fi
+          
           echo "✓ All required directories (bin, include, lib, share) are in the tarball"
 
       - name: Upload artifact
