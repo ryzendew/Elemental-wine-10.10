@@ -204,68 +204,17 @@ jobs:
             make dlls/win32u/win32u.so || echo "Could not build win32u.so"
           fi
           
-          # Use single-threaded install to avoid race conditions
-          # For 64-bit only build, we need to install both lib and dev components
-          echo "Installing Wine libraries and runtime..."
-          make install-lib 2>&1 | tee -a wine-install.log || {
-            echo "❌ ERROR: Failed to install Wine libraries"
+          # Use make install (like build-wine.sh does) - this installs everything
+          echo "Installing Wine (using ${{ env.BUILD_THREADS }} threads)..."
+          make install -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
+            echo "❌ ERROR: Failed to install Wine"
             echo "Last 50 lines of install log:"
             tail -50 wine-install.log
             exit 1
           }
           
           echo ""
-          echo "Installing Wine development files and binaries..."
-          make install-dev 2>&1 | tee -a wine-install.log || {
-            echo "❌ ERROR: Failed to install Wine development files"
-            echo "Last 50 lines of install log:"
-            tail -50 wine-install.log
-            exit 1
-          }
-          
-          # Check what was actually installed and fail if required directories are missing
-          echo ""
-          echo "Checking installed directories:"
-          if [ ! -d "${{ env.INSTALL_PREFIX }}" ]; then
-            echo "❌ ERROR: Install prefix directory not found at ${{ env.INSTALL_PREFIX }}"
-            echo "Checking what was created:"
-            ls -la .. | grep -E "(wine|install)" || true
-            exit 1
-          fi
-          
-          echo "Install prefix: ${{ env.INSTALL_PREFIX }}"
-          ls -la "${{ env.INSTALL_PREFIX }}" || true
-          echo ""
-          
-          # Verify all required directories exist, fail if any are missing
-          MISSING_DIRS=()
-          echo "Checking for required directories:"
-          for dir in bin include lib share; do
-            if [ -d "${{ env.INSTALL_PREFIX }}/$dir" ]; then
-              file_count=$(find "${{ env.INSTALL_PREFIX }}/$dir" -type f 2>/dev/null | wc -l)
-              echo "  ✓ $dir/ exists ($file_count files)"
-              if [ "$file_count" -eq 0 ]; then
-                echo "  ⚠ WARNING: $dir/ is empty!"
-              fi
-            else
-              echo "  ❌ $dir/ MISSING!"
-              MISSING_DIRS+=("$dir")
-            fi
-          done
-          
-          if [ ${#MISSING_DIRS[@]} -gt 0 ]; then
-            echo ""
-            echo "❌ ERROR: Missing required directories: ${MISSING_DIRS[*]}"
-            echo "Install log summary:"
-            grep -i "error\|fail\|missing" wine-install.log | tail -20 || true
-            echo ""
-            echo "Full directory structure:"
-            find "${{ env.INSTALL_PREFIX }}" -maxdepth 2 -type d 2>/dev/null | sort
-            exit 1
-          fi
-          
-          echo ""
-          echo "✓ Wine installed successfully - all required directories present"
+          echo "✓ Wine installed successfully"
 
       - name: Verify installation
         run: |
@@ -319,161 +268,9 @@ jobs:
         run: |
           echo "Creating tarball ElementalWarrior-wine-10.10.tar.xz..."
           cd ${{ github.workspace }}
-          
-          # Verify all required directories exist before creating tarball
-          echo "Verifying all required directories are present:"
-          for dir in bin include lib share; do
-            if [ ! -d "wine-install/$dir" ]; then
-              echo "❌ ERROR: Required directory 'wine-install/$dir' is missing!"
-              exit 1
-            fi
-            echo "✓ wine-install/$dir/ exists"
-          done
-          
-          echo ""
-          echo "Checking wine-install directory contents:"
-          ls -la wine-install/ || { echo "❌ ERROR: wine-install directory not found!"; exit 1; }
-          echo ""
-          echo "Checking if directories have content:"
-          for dir in bin include lib share; do
-            if [ -d "wine-install/$dir" ]; then
-              file_count=$(find "wine-install/$dir" -type f 2>/dev/null | wc -l)
-              echo "  $dir/: $file_count files"
-              if [ "$file_count" -eq 0 ]; then
-                echo "  ⚠ WARNING: $dir/ is empty!"
-              fi
-            fi
-          done
-          echo ""
-          
-          # Verify wine-install has content before creating tarball
-          total_files_in_install=$(find wine-install -type f 2>/dev/null | wc -l)
-          if [ "$total_files_in_install" -eq 0 ]; then
-            echo "❌ ERROR: wine-install directory is empty (no files found)!"
-            echo "Directory structure:"
-            find wine-install -type d 2>/dev/null | head -20 || true
-            exit 1
-          fi
-          echo "Found $total_files_in_install files in wine-install, creating tarball..."
-          
-          echo "Creating tarball with all contents (bin, include, lib, share)..."
-          # Remove any existing tarball first
-          rm -f ElementalWarrior-wine-10.10.tar.xz
-          
-          # Create tarball and capture output
-          tar_output=$(tar -cJf ElementalWarrior-wine-10.10.tar.xz -C wine-install . 2>&1)
-          tar_exit=$?
-          
-          if [ $tar_exit -ne 0 ]; then
-            echo "❌ ERROR: tar command failed (exit code: $tar_exit)!"
-            echo "Tar output:"
-            echo "$tar_output"
-            echo ""
-            echo "Checking wine-install directory:"
-            ls -la wine-install/ || true
-            exit 1
-          fi
-          
-          # Check tarball was created and has content
-          if [ ! -f "ElementalWarrior-wine-10.10.tar.xz" ]; then
-            echo "❌ ERROR: Tarball file was not created!"
-            exit 1
-          fi
-          
-          tarball_size=$(stat -f%z ElementalWarrior-wine-10.10.tar.xz 2>/dev/null || stat -c%s ElementalWarrior-wine-10.10.tar.xz 2>/dev/null || echo "0")
-          if [ "$tarball_size" -eq 0 ]; then
-            echo "❌ ERROR: Tarball is 0 bytes (empty)!"
-            echo "Checking wine-install directory:"
-            ls -la wine-install/ || true
-            echo ""
-            echo "Checking wine-install contents:"
-            find wine-install -type f 2>/dev/null | head -20 || echo "No files found"
-            exit 1
-          fi
-          
+          tar -cJf ElementalWarrior-wine-10.10.tar.xz -C wine-install .
           echo "✓ Tarball created successfully"
           ls -lh ElementalWarrior-wine-10.10.tar.xz
-          echo ""
-          echo "Tarball size: $(du -h ElementalWarrior-wine-10.10.tar.xz | cut -f1) ($tarball_size bytes)"
-          echo "Tarball location: ${{ github.workspace }}/ElementalWarrior-wine-10.10.tar.xz"
-          echo ""
-          echo "Verifying tarball contents:"
-          
-          # Test if tarball can be read - disable exit on error temporarily
-          set +e
-          tar -tzf ElementalWarrior-wine-10.10.tar.xz > /tmp/tarball-contents.txt 2>/tmp/tar-errors.txt
-          tar_exit=$?
-          set -e
-          
-          if [ $tar_exit -ne 0 ]; then
-            echo "⚠ WARNING: tar -tzf failed (exit code: $tar_exit), trying alternative method..."
-            echo "Tar error output:"
-            cat /tmp/tar-errors.txt 2>/dev/null || echo "(no error output)"
-            
-            # Try alternative: decompress first, then list
-            set +e
-            xz -dc ElementalWarrior-wine-10.10.tar.xz 2>/dev/null | tar -t > /tmp/tarball-contents.txt 2>/tmp/tar-errors2.txt
-            alt_exit=$?
-            set -e
-            
-            if [ $alt_exit -ne 0 ]; then
-              echo "❌ ERROR: Both tar methods failed!"
-              echo "Alternative method errors:"
-              cat /tmp/tar-errors2.txt 2>/dev/null || echo "(no errors)"
-              echo ""
-              echo "Checking tarball file:"
-              file ElementalWarrior-wine-10.10.tar.xz || true
-              ls -lh ElementalWarrior-wine-10.10.tar.xz || true
-              echo ""
-              echo "Checking wine-install contents:"
-              find wine-install -type f 2>/dev/null | head -20 || true
-              exit 1
-            else
-              echo "✓ Alternative method succeeded"
-            fi
-          fi
-          
-          # Check if the output file has content
-          if [ ! -s /tmp/tarball-contents.txt ]; then
-            echo "❌ ERROR: Tarball listing is empty!"
-            echo "Checking wine-install:"
-            find wine-install -type f 2>/dev/null | head -20 || true
-            exit 1
-          fi
-          
-          total_files=$(wc -l < /tmp/tarball-contents.txt)
-          echo "Total files in tarball: $total_files"
-          
-          if [ "$total_files" -eq 0 ]; then
-            echo "❌ ERROR: Tarball is empty (no files listed)!"
-            exit 1
-          fi
-          
-          echo "Sample of tarball contents:"
-          head -20 /tmp/tarball-contents.txt
-          echo "..."
-          
-          echo ""
-          echo "Checking for required directories in tarball:"
-          MISSING_IN_TARBALL=()
-          for dir in bin include lib share; do
-            if grep -q "^$dir/" /tmp/tarball-contents.txt; then
-              echo "✓ $dir/ found in tarball"
-            else
-              echo "❌ $dir/ NOT found in tarball!"
-              MISSING_IN_TARBALL+=("$dir")
-            fi
-          done
-          
-          if [ ${#MISSING_IN_TARBALL[@]} -gt 0 ]; then
-            echo ""
-            echo "❌ ERROR: Missing directories in tarball: ${MISSING_IN_TARBALL[*]}"
-            echo "Available directories in tarball:"
-            cut -d'/' -f1 /tmp/tarball-contents.txt | sort -u | head -10
-            exit 1
-          fi
-          
-          echo "✓ All required directories (bin, include, lib, share) are in the tarball"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
