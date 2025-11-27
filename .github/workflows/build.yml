@@ -1,0 +1,248 @@
+name: Build Wine
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - main
+      - master
+  merge_group:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # Skip build if PR was closed without merging
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.event.action != 'closed') ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      github.event_name == 'merge_group' ||
+      github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            gcc \
+            g++ \
+            make \
+            flex \
+            bison \
+            autoconf \
+            automake \
+            libtool \
+            gettext \
+            git \
+            wget \
+            curl \
+            tar \
+            xz-utils \
+            patch \
+            pkg-config \
+            xorg-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrender-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxi-dev \
+            libxfixes-dev \
+            libxcursor-dev \
+            libxcomposite-dev \
+            libxdamage-dev \
+            libxss-dev \
+            libxtst-dev \
+            libxrandr-dev \
+            libasound2-dev \
+            libpulse-dev \
+            libdbus-1-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libjpeg-dev \
+            libpng-dev \
+            libtiff-dev \
+            liblcms2-dev \
+            libxml2-dev \
+            libxslt1-dev \
+            libgnutls28-dev \
+            libsane-dev \
+            libv4l-dev \
+            libgphoto2-dev \
+            libcapi20-dev \
+            libcups2-dev \
+            libkrb5-dev \
+            libldap2-dev \
+            libsdl2-dev \
+            libusb-1.0-0-dev \
+            libudev-dev \
+            libunwind-dev \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            samba-dev \
+            ocl-icd-opencl-dev \
+            opencl-headers \
+            libvkd3d-dev \
+            libvkd3d-utils-dev \
+            libvkd3d-shader-dev \
+            libfaudio-dev \
+            libmpg123-dev \
+            libfluidsynth-dev \
+            libgsm1-dev \
+            libjpeg-turbo8-dev \
+            libjxr-dev \
+            zlib1g-dev
+
+      - name: Verify OpenCL headers
+        run: |
+          if [ ! -f "/usr/include/CL/cl.h" ] && [ ! -f "/usr/local/include/CL/cl.h" ]; then
+            echo "ERROR: OpenCL headers not found!"
+            exit 1
+          fi
+          echo "✓ OpenCL headers found"
+
+      - name: Set build environment variables
+        run: |
+          echo "BUILD_THREADS=$(nproc)" >> $GITHUB_ENV
+          echo "CFLAGS=-O2 -std=gnu17 -pipe -ffat-lto-objects -Wno-discarded-qualifiers -Wno-format -Wno-maybe-uninitialized -Wno-misleading-indentation" >> $GITHUB_ENV
+          echo "CROSSCFLAGS=-O2 -std=gnu17 -pipe -Wno-discarded-qualifiers -Wno-format -Wno-maybe-uninitialized -Wno-misleading-indentation" >> $GITHUB_ENV
+          echo "CROSSCXXFLAGS=-O2 -std=gnu17 -pipe -Wno-discarded-qualifiers -Wno-format -Wno-maybe-uninitialized -Wno-misleading-indentation" >> $GITHUB_ENV
+          echo "CROSSLDFLAGS=-Wl,-O1" >> $GITHUB_ENV
+          echo "INSTALL_PREFIX=${{ runner.workspace }}/wine-install" >> $GITHUB_ENV
+
+      - name: Prepare build directory
+        run: |
+          # Verify configure script exists
+          if [ ! -f "./configure" ]; then
+            echo "❌ ERROR: configure script not found!"
+            echo "This repository should contain a pre-configured Wine source."
+            exit 1
+          fi
+          echo "✓ Configure script found"
+          
+          mkdir -p wine64-build
+          mkdir -p ${{ env.INSTALL_PREFIX }}
+          echo "✓ Build directories created"
+
+      - name: Configure Wine (64-bit)
+        working-directory: wine64-build
+        env:
+          CFLAGS: ${{ env.CFLAGS }}
+          CROSSCFLAGS: ${{ env.CROSSCFLAGS }}
+          CROSSCXXFLAGS: ${{ env.CROSSCXXFLAGS }}
+          CROSSLDFLAGS: ${{ env.CROSSLDFLAGS }}
+        run: |
+          ../configure \
+            --prefix="${{ env.INSTALL_PREFIX }}" \
+            --enable-opencl \
+            --enable-win64 \
+            2>&1 | grep -v "configure: OSS sound system found but too old (OSSv4 needed)" || true
+          
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "❌ ERROR: Wine configure failed!"
+            exit 1
+          fi
+          echo "✓ Wine configure completed successfully"
+
+      - name: Build Wine (64-bit)
+        working-directory: wine64-build
+        env:
+          CFLAGS: ${{ env.CFLAGS }}
+          CROSSCFLAGS: ${{ env.CROSSCFLAGS }}
+          CROSSCXXFLAGS: ${{ env.CROSSCXXFLAGS }}
+          CROSSLDFLAGS: ${{ env.CROSSLDFLAGS }}
+        run: |
+          echo "Building Wine with ${{ env.BUILD_THREADS }} threads..."
+          make -j${{ env.BUILD_THREADS }} 2>&1 | tee wine-build.log || {
+            echo "❌ ERROR: Wine build failed!"
+            echo "Last 50 lines of build log:"
+            tail -50 wine-build.log
+            exit 1
+          }
+          
+          # Filter out parser/sql warnings from output
+          grep -Ev "(parser|sql)\.y: (warning|note):" wine-build.log || true
+          echo "✓ Wine build completed successfully"
+
+      - name: Install Wine
+        working-directory: wine64-build
+        env:
+          CFLAGS: ${{ env.CFLAGS }}
+          CROSSCFLAGS: ${{ env.CROSSCFLAGS }}
+          CROSSCXXFLAGS: ${{ env.CROSSCXXFLAGS }}
+          CROSSLDFLAGS: ${{ env.CROSSLDFLAGS }}
+        run: |
+          echo "Installing Wine..."
+          make install -j${{ env.BUILD_THREADS }} || {
+            echo "❌ ERROR: Failed to install Wine"
+            exit 1
+          }
+          echo "✓ Wine installed successfully"
+
+      - name: Verify installation
+        run: |
+          if [ ! -d "${{ env.INSTALL_PREFIX }}/bin" ]; then
+            echo "❌ ERROR: Installation directory not found!"
+            exit 1
+          fi
+          echo "✓ Installation verified"
+          echo "Installation directory contents:"
+          ls -la "${{ env.INSTALL_PREFIX }}" || true
+          echo ""
+          echo "Bin directory contents:"
+          ls -la "${{ env.INSTALL_PREFIX }}/bin" || true
+
+      - name: Create tarball
+        run: |
+          echo "Creating tarball ElementalWarrior-wine-10.10.tar.xz..."
+          cd ${{ runner.workspace }}
+          tar -cJf ElementalWarrior-wine-10.10.tar.xz -C wine-install .
+          
+          if [ ! -f "ElementalWarrior-wine-10.10.tar.xz" ]; then
+            echo "❌ ERROR: Failed to create tarball!"
+            exit 1
+          fi
+          
+          echo "✓ Tarball created successfully"
+          ls -lh ElementalWarrior-wine-10.10.tar.xz
+          echo ""
+          echo "Tarball size: $(du -h ElementalWarrior-wine-10.10.tar.xz | cut -f1)"
+          echo "Tarball location: ${{ runner.workspace }}/ElementalWarrior-wine-10.10.tar.xz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ElementalWarrior-wine-10.10
+          path: ${{ runner.workspace }}/ElementalWarrior-wine-10.10.tar.xz
+          retention-days: 30
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "=========================================="
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✓ BUILD COMPLETE!"
+          else
+            echo "❌ BUILD FAILED!"
+          fi
+          echo "=========================================="
+          echo ""
+          echo "Artifact: ElementalWarrior-wine-10.10.tar.xz"
+          echo "Installation prefix: ${{ env.INSTALL_PREFIX }}"
+          echo ""
+
