@@ -346,15 +346,31 @@ jobs:
           done
           echo ""
           
+          # Verify wine-install has content before creating tarball
+          total_files_in_install=$(find wine-install -type f 2>/dev/null | wc -l)
+          if [ "$total_files_in_install" -eq 0 ]; then
+            echo "❌ ERROR: wine-install directory is empty (no files found)!"
+            echo "Directory structure:"
+            find wine-install -type d 2>/dev/null | head -20 || true
+            exit 1
+          fi
+          echo "Found $total_files_in_install files in wine-install, creating tarball..."
+          
           echo "Creating tarball with all contents (bin, include, lib, share)..."
-          # Use verbose mode to see what's being added, and handle errors properly
-          if ! tar -cJf ElementalWarrior-wine-10.10.tar.xz -C wine-install . 2>&1; then
-            echo "❌ ERROR: tar command failed!"
+          # Remove any existing tarball first
+          rm -f ElementalWarrior-wine-10.10.tar.xz
+          
+          # Create tarball and capture output
+          tar_output=$(tar -cJf ElementalWarrior-wine-10.10.tar.xz -C wine-install . 2>&1)
+          tar_exit=$?
+          
+          if [ $tar_exit -ne 0 ]; then
+            echo "❌ ERROR: tar command failed (exit code: $tar_exit)!"
+            echo "Tar output:"
+            echo "$tar_output"
+            echo ""
             echo "Checking wine-install directory:"
             ls -la wine-install/ || true
-            echo ""
-            echo "Checking if wine-install is empty:"
-            find wine-install -maxdepth 1 -type f 2>/dev/null | head -10 || echo "No files found"
             exit 1
           fi
           
@@ -363,27 +379,60 @@ jobs:
             exit 1
           fi
           
+          # Check tarball was created and has content
+          if [ ! -f "ElementalWarrior-wine-10.10.tar.xz" ]; then
+            echo "❌ ERROR: Tarball file was not created!"
+            exit 1
+          fi
+          
+          tarball_size=$(stat -f%z ElementalWarrior-wine-10.10.tar.xz 2>/dev/null || stat -c%s ElementalWarrior-wine-10.10.tar.xz 2>/dev/null || echo "0")
+          if [ "$tarball_size" -eq 0 ]; then
+            echo "❌ ERROR: Tarball is 0 bytes (empty)!"
+            echo "Checking wine-install directory:"
+            ls -la wine-install/ || true
+            echo ""
+            echo "Checking wine-install contents:"
+            find wine-install -type f 2>/dev/null | head -20 || echo "No files found"
+            exit 1
+          fi
+          
           echo "✓ Tarball created successfully"
           ls -lh ElementalWarrior-wine-10.10.tar.xz
           echo ""
-          echo "Tarball size: $(du -h ElementalWarrior-wine-10.10.tar.xz | cut -f1)"
+          echo "Tarball size: $(du -h ElementalWarrior-wine-10.10.tar.xz | cut -f1) ($tarball_size bytes)"
           echo "Tarball location: ${{ github.workspace }}/ElementalWarrior-wine-10.10.tar.xz"
           echo ""
           echo "Verifying tarball contents:"
-          if ! tar -tzf ElementalWarrior-wine-10.10.tar.xz > /dev/null 2>&1; then
-            echo "❌ ERROR: Tarball is corrupted or empty!"
+          # Test if tarball can be read
+          tar_output=$(tar -tzf ElementalWarrior-wine-10.10.tar.xz 2>&1)
+          tar_exit=$?
+          
+          if [ $tar_exit -ne 0 ]; then
+            echo "❌ ERROR: Cannot read tarball (exit code: $tar_exit)!"
+            echo "Tar error output:"
+            echo "$tar_output"
+            echo ""
+            echo "Checking tarball file type:"
+            file ElementalWarrior-wine-10.10.tar.xz || true
+            echo ""
+            echo "Checking wine-install before tarball creation:"
+            ls -la wine-install/ || true
             exit 1
           fi
           
-          tar -tzf ElementalWarrior-wine-10.10.tar.xz | head -20
-          echo "..."
-          total_files=$(tar -tzf ElementalWarrior-wine-10.10.tar.xz | wc -l)
+          total_files=$(echo "$tar_output" | wc -l)
           echo "Total files in tarball: $total_files"
           
           if [ "$total_files" -eq 0 ]; then
-            echo "❌ ERROR: Tarball is empty!"
+            echo "❌ ERROR: Tarball is empty (no files listed)!"
+            echo "Checking what's in wine-install:"
+            find wine-install -type f 2>/dev/null | head -20 || true
             exit 1
           fi
+          
+          echo "Sample of tarball contents:"
+          echo "$tar_output" | head -20
+          echo "..."
           
           echo ""
           echo "Checking for required directories in tarball:"
