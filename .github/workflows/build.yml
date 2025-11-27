@@ -235,22 +235,73 @@ jobs:
             make dlls/win32u/win32u.so || echo "Could not build win32u.so"
           fi
           
-          # Use make install to install everything (like build-wine.sh does)
-          # For 64-bit builds, we also need install-dev to ensure headers are included
-          echo "Installing Wine (using ${{ env.BUILD_THREADS }} threads)..."
-          make install -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
-            echo "❌ ERROR: Failed to install Wine"
-            echo "Last 50 lines of install log:"
+          # For 64-bit only builds (--enable-win64), programs are NOT included in TOP_INSTALL_LIB
+          # We need to install libs, dev files, and then explicitly install programs
+          echo "Installing Wine libraries and DLLs..."
+          make install-lib -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
+            echo "❌ ERROR: Failed to install Wine libraries"
             tail -50 wine-install.log
             exit 1
           }
           
-          # Ensure development files (headers) are installed
           echo ""
           echo "Installing Wine development files (headers)..."
           make install-dev -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
             echo "⚠ WARNING: make install-dev failed, but continuing..."
           }
+          
+          echo ""
+          echo "Installing Wine programs and binaries..."
+          # For 64-bit builds, programs must be installed explicitly
+          # Install all programs from programs directory
+          for progdir in programs/*/; do
+            if [ -d "$progdir" ] && [ -f "$progdir/Makefile" ]; then
+              echo "Installing $progdir..."
+              make -C "$progdir" install 2>&1 | tee -a wine-install.log || {
+                echo "⚠ WARNING: Failed to install $progdir"
+              }
+            fi
+          done
+          
+          echo ""
+          echo "Installing Wine tools (widl, winebuild, winegcc, etc.)..."
+          # Install all tools from tools directory
+          for tooldir in tools/wine tools/widl tools/winebuild tools/winedump tools/winegcc tools/winemaker tools/wmc tools/wrc; do
+            if [ -d "$tooldir" ] && [ -f "$tooldir/Makefile" ]; then
+              echo "Installing $tooldir..."
+              make -C "$tooldir" install 2>&1 | tee -a wine-install.log || {
+                echo "⚠ WARNING: Failed to install $tooldir"
+              }
+            fi
+          done
+          
+          # Install wine program from loader (includes wine.inf)
+          if [ -d "loader" ] && [ -f "loader/Makefile" ]; then
+            echo "Installing loader/wine and wine.inf..."
+            make -C loader install 2>&1 | tee -a wine-install.log || {
+              echo "⚠ WARNING: Failed to install loader"
+            }
+          fi
+          
+          # Install wineserver
+          if [ -d "server" ] && [ -f "server/Makefile" ]; then
+            echo "Installing server/wineserver..."
+            make -C server install 2>&1 | tee -a wine-install.log || {
+              echo "⚠ WARNING: Failed to install server"
+            }
+          fi
+          
+          echo ""
+          echo "Installing Wine fonts and NLS files..."
+          # Install fonts
+          if [ -d "fonts" ] && [ -f "fonts/Makefile" ]; then
+            make -C fonts install 2>&1 | tee -a wine-install.log || echo "⚠ WARNING: Failed to install fonts"
+          fi
+          
+          # Install NLS files
+          if [ -d "nls" ] && [ -f "nls/Makefile" ]; then
+            make -C nls install 2>&1 | tee -a wine-install.log || echo "⚠ WARNING: Failed to install nls"
+          fi
           
           echo ""
           echo "✓ Wine installed successfully"
