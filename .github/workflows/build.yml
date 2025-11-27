@@ -52,6 +52,7 @@ jobs:
             xz-utils \
             patch \
             pkg-config \
+            ccache \
             xorg-dev \
             libx11-dev \
             libxext-dev \
@@ -98,6 +99,20 @@ jobs:
             ocl-icd-opencl-dev \
             opencl-headers
 
+      - name: Set up ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+
+      - name: Configure ccache
+        run: |
+          ccache --set-config=max_size=2G
+          ccache --set-config=compression=true
+          ccache -s
+
       - name: Verify OpenCL headers
         run: |
           if [ ! -f "/usr/include/CL/cl.h" ] && [ ! -f "/usr/local/include/CL/cl.h" ]; then
@@ -132,6 +147,8 @@ jobs:
       - name: Configure Wine (64-bit)
         working-directory: wine64-build
         env:
+          CC: ccache gcc
+          CXX: ccache g++
           CFLAGS: ${{ env.CFLAGS }}
           CROSSCFLAGS: ${{ env.CROSSCFLAGS }}
           CROSSCXXFLAGS: ${{ env.CROSSCXXFLAGS }}
@@ -152,6 +169,8 @@ jobs:
       - name: Build Wine (64-bit)
         working-directory: wine64-build
         env:
+          CC: ccache gcc
+          CXX: ccache g++
           CFLAGS: ${{ env.CFLAGS }}
           CROSSCFLAGS: ${{ env.CROSSCFLAGS }}
           CROSSCXXFLAGS: ${{ env.CROSSCXXFLAGS }}
@@ -168,6 +187,9 @@ jobs:
           # Filter out parser/sql warnings from output
           grep -Ev "(parser|sql)\.y: (warning|note):" wine-build.log || true
           echo "✓ Wine build completed successfully"
+          echo ""
+          echo "ccache statistics:"
+          ccache -s
           
           # Verify critical build artifacts exist (check multiple possible locations)
           echo "Checking for Wine executables..."
@@ -188,6 +210,8 @@ jobs:
       - name: Install Wine
         working-directory: wine64-build
         env:
+          CC: ccache gcc
+          CXX: ccache g++
           CFLAGS: ${{ env.CFLAGS }}
           CROSSCFLAGS: ${{ env.CROSSCFLAGS }}
           CROSSCXXFLAGS: ${{ env.CROSSCXXFLAGS }}
@@ -211,6 +235,14 @@ jobs:
             echo "Last 50 lines of install log:"
             tail -50 wine-install.log
             exit 1
+          }
+          
+          # For 64-bit only builds, make install might not install headers
+          # Explicitly install development files to ensure include/ is present
+          echo ""
+          echo "Installing Wine development files (headers)..."
+          make install-dev 2>&1 | tee -a wine-install.log || {
+            echo "⚠ WARNING: make install-dev failed, but continuing..."
           }
           
           echo ""
