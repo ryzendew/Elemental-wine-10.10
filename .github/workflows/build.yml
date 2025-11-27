@@ -194,6 +194,9 @@ jobs:
           CROSSLDFLAGS: ${{ env.CROSSLDFLAGS }}
         run: |
           echo "Installing Wine..."
+          # Initialize install log
+          echo "=== Wine Installation Log ===" > wine-install.log
+          
           # Verify win32u.so was built before attempting install
           if [ ! -f "dlls/win32u/win32u.so" ]; then
             echo "⚠ WARNING: win32u.so not found, checking if it needs to be built..."
@@ -206,6 +209,7 @@ jobs:
           echo "Installing Wine libraries and runtime..."
           make install-lib 2>&1 | tee -a wine-install.log || {
             echo "❌ ERROR: Failed to install Wine libraries"
+            echo "Last 50 lines of install log:"
             tail -50 wine-install.log
             exit 1
           }
@@ -214,6 +218,7 @@ jobs:
           echo "Installing Wine development files and binaries..."
           make install-dev 2>&1 | tee -a wine-install.log || {
             echo "❌ ERROR: Failed to install Wine development files"
+            echo "Last 50 lines of install log:"
             tail -50 wine-install.log
             exit 1
           }
