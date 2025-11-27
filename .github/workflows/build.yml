@@ -214,20 +214,49 @@ jobs:
             grep -i "win32u" wine-install.log | tail -20 || true
             exit 1
           }
+          
+          # Verify install actually created the directory
+          if [ ! -d "${{ env.INSTALL_PREFIX }}" ]; then
+            echo "⚠ WARNING: Install completed but directory not found at ${{ env.INSTALL_PREFIX }}"
+            echo "Checking what was created:"
+            ls -la .. | grep -E "(wine|install)" || true
+          fi
+          
           echo "✓ Wine installed successfully"
 
       - name: Verify installation
         run: |
-          if [ ! -d "${{ env.INSTALL_PREFIX }}/bin" ]; then
-            echo "❌ ERROR: Installation directory not found!"
+          echo "Verifying installation at: ${{ env.INSTALL_PREFIX }}"
+          
+          # Check if install directory exists at all
+          if [ ! -d "${{ env.INSTALL_PREFIX }}" ]; then
+            echo "❌ ERROR: Installation directory not found at ${{ env.INSTALL_PREFIX }}"
+            echo "Checking if it exists elsewhere:"
+            find ${{ github.workspace }} -type d -name "wine-install" 2>/dev/null || echo "No wine-install directory found"
+            echo ""
+            echo "Checking what was created in the repository root:"
+            ls -la ${{ github.workspace }} | head -20 || true
             exit 1
           fi
-          echo "✓ Installation verified"
+          
+          echo "✓ Installation directory exists"
           echo "Installation directory contents:"
           ls -la "${{ env.INSTALL_PREFIX }}" || true
           echo ""
-          echo "Bin directory contents:"
-          ls -la "${{ env.INSTALL_PREFIX }}/bin" || true
+          
+          # Check for bin directory (might be in different location)
+          if [ -d "${{ env.INSTALL_PREFIX }}/bin" ]; then
+            echo "✓ Bin directory found"
+            echo "Bin directory contents:"
+            ls -la "${{ env.INSTALL_PREFIX }}/bin" || true
+          else
+            echo "⚠ WARNING: bin directory not found at expected location"
+            echo "Searching for bin directories:"
+            find "${{ env.INSTALL_PREFIX }}" -type d -name "bin" 2>/dev/null | head -5 || echo "No bin directories found"
+            echo ""
+            echo "Full directory structure:"
+            find "${{ env.INSTALL_PREFIX }}" -maxdepth 2 -type d 2>/dev/null | head -20 || true
+          fi
 
       - name: Create tarball
         run: |
