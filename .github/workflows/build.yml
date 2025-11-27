@@ -400,13 +400,40 @@ jobs:
           echo "Verifying tarball contents:"
           
           # Test if tarball can be read - use a temp file to avoid issues with command substitution
-          if ! tar -tzf ElementalWarrior-wine-10.10.tar.xz > /tmp/tarball-contents.txt 2>/tmp/tar-errors.txt; then
-            echo "❌ ERROR: Cannot read tarball!"
+          tar -tzf ElementalWarrior-wine-10.10.tar.xz > /tmp/tarball-contents.txt 2>/tmp/tar-errors.txt
+          tar_exit=$?
+          
+          if [ $tar_exit -ne 0 ]; then
+            echo "❌ ERROR: Cannot read tarball (exit code: $tar_exit)!"
             echo "Tar error output:"
-            cat /tmp/tar-errors.txt || true
+            cat /tmp/tar-errors.txt 2>/dev/null || echo "(no error output)"
             echo ""
-            echo "Checking tarball file type:"
+            echo "Checking tarball file:"
             file ElementalWarrior-wine-10.10.tar.xz || true
+            ls -lh ElementalWarrior-wine-10.10.tar.xz || true
+            echo ""
+            echo "Attempting to decompress and check:"
+            xz -t ElementalWarrior-wine-10.10.tar.xz 2>&1 || echo "XZ test failed"
+            echo ""
+            echo "Trying to extract and check:"
+            xz -dc ElementalWarrior-wine-10.10.tar.xz 2>&1 | tar -t 2>&1 | head -10 || echo "Extraction test failed"
+            echo ""
+            echo "Checking wine-install contents that should be in tarball:"
+            find wine-install -type f 2>/dev/null | head -20 || true
+            echo ""
+            echo "Checking wine-install directory structure:"
+            find wine-install -maxdepth 2 -type d 2>/dev/null | sort || true
+            exit 1
+          fi
+          
+          # Check if the output file has content
+          if [ ! -s /tmp/tarball-contents.txt ]; then
+            echo "❌ ERROR: Tarball listing is empty!"
+            echo "Tar errors:"
+            cat /tmp/tar-errors.txt 2>/dev/null || echo "(no errors)"
+            echo ""
+            echo "Trying alternative method to list tarball:"
+            xz -dc ElementalWarrior-wine-10.10.tar.xz 2>&1 | tar -t 2>&1 | head -20 || echo "Alternative method failed"
             exit 1
           fi
           
