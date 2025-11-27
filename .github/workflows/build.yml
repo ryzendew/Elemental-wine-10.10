@@ -191,6 +191,13 @@ jobs:
           echo "ccache statistics:"
           ccache -s
           
+          # Ensure all programs are built (some might not be built by default in 64-bit only)
+          echo ""
+          echo "Building Wine programs..."
+          make programs -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-build.log || {
+            echo "⚠ WARNING: Some programs may not have been built"
+          }
+          
           # Verify critical build artifacts exist (check multiple possible locations)
           echo "Checking for Wine executables..."
           if [ -f "programs/wine/wine" ]; then
@@ -228,27 +235,17 @@ jobs:
             make dlls/win32u/win32u.so || echo "Could not build win32u.so"
           fi
           
-          # For 64-bit only builds, we need to install components separately
-          # to ensure everything is installed (libs, programs, headers)
-          echo "Installing Wine libraries..."
-          make install-lib -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
-            echo "❌ ERROR: Failed to install Wine libraries"
+          # Use make install to install everything (like build-wine.sh does)
+          # For 64-bit builds, we also need install-dev to ensure headers are included
+          echo "Installing Wine (using ${{ env.BUILD_THREADS }} threads)..."
+          make install -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
+            echo "❌ ERROR: Failed to install Wine"
             echo "Last 50 lines of install log:"
             tail -50 wine-install.log
             exit 1
           }
           
-          echo ""
-          echo "Installing Wine programs and binaries..."
-          make install-programs -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
-            echo "⚠ WARNING: make install-programs failed, trying make install..."
-            make install -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
-              echo "❌ ERROR: Failed to install Wine programs"
-              tail -50 wine-install.log
-              exit 1
-            }
-          }
-          
+          # Ensure development files (headers) are installed
           echo ""
           echo "Installing Wine development files (headers)..."
           make install-dev -j${{ env.BUILD_THREADS }} 2>&1 | tee -a wine-install.log || {
