@@ -202,24 +202,42 @@ jobs:
           fi
           
           # Use single-threaded install to avoid race conditions
-          make install 2>&1 | tee wine-install.log || {
-            echo "❌ ERROR: Failed to install Wine"
-            echo "Checking for win32u.so:"
-            ls -la dlls/win32u/win32u.so 2>&1 || echo "win32u.so not found"
-            echo ""
-            echo "Last 100 lines of install log:"
-            tail -100 wine-install.log
-            echo ""
-            echo "Searching for win32u errors in install log:"
-            grep -i "win32u" wine-install.log | tail -20 || true
+          # For 64-bit only build, we need to install both lib and dev components
+          echo "Installing Wine libraries and runtime..."
+          make install-lib 2>&1 | tee -a wine-install.log || {
+            echo "❌ ERROR: Failed to install Wine libraries"
+            tail -50 wine-install.log
             exit 1
           }
           
-          # Verify install actually created the directory
-          if [ ! -d "${{ env.INSTALL_PREFIX }}" ]; then
-            echo "⚠ WARNING: Install completed but directory not found at ${{ env.INSTALL_PREFIX }}"
+          echo ""
+          echo "Installing Wine development files and binaries..."
+          make install-dev 2>&1 | tee -a wine-install.log || {
+            echo "❌ ERROR: Failed to install Wine development files"
+            tail -50 wine-install.log
+            exit 1
+          }
+          
+          # Check what was actually installed
+          echo ""
+          echo "Checking installed directories:"
+          if [ -d "${{ env.INSTALL_PREFIX }}" ]; then
+            echo "Install prefix: ${{ env.INSTALL_PREFIX }}"
+            ls -la "${{ env.INSTALL_PREFIX }}" || true
+            echo ""
+            echo "Checking for required directories:"
+            for dir in bin include lib share; do
+              if [ -d "${{ env.INSTALL_PREFIX }}/$dir" ]; then
+                echo "  ✓ $dir/ exists ($(find "${{ env.INSTALL_PREFIX }}/$dir" -type f 2>/dev/null | wc -l) files)"
+              else
+                echo "  ✗ $dir/ MISSING"
+              fi
+            done
+          else
+            echo "❌ ERROR: Install prefix directory not found at ${{ env.INSTALL_PREFIX }}"
             echo "Checking what was created:"
             ls -la .. | grep -E "(wine|install)" || true
+            exit 1
           fi
           
           echo "✓ Wine installed successfully"
